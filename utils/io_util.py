@@ -164,7 +164,7 @@ def pad_seq(no_pad_examples, pad_idx, max_word_seq=-1):
     return padded_words, full_mask
 
 
-def pad_seq_seq(no_pad_examples, pad_idx, max_word_seq=-1, max_track_seq=-1):
+def pad_seq_seq( no_pad_examples, pad_idx, max_word_seq=-1, max_track_seq=-1):
     if max_word_seq < 0:
         max_word_seq = float('inf')
     if max_track_seq < 0:
@@ -203,6 +203,56 @@ def pad_seq_seq(no_pad_examples, pad_idx, max_word_seq=-1, max_track_seq=-1):
     return padded_examples, full_mask, track_mask
 
 
+###############kishore_update#######################################
+def bert_pad_seq_seq( no_pad_examples, pad_idx, max_word_seq=-1, max_track_seq=-1):
+    if max_word_seq < 0:
+        max_word_seq = float('inf')
+    if max_track_seq < 0:
+        max_track_seq = float('inf')
+
+    max_track_len, max_word_len = 0, 0
+    for track in no_pad_examples:
+        # track = track['input_ids'][0]
+        max_track_len = max(max_track_len, len(track))
+        for words in track:
+            max_word_len = max(max_track_len, len(words))
+    max_word_len = min(max_word_len, max_word_seq)
+    max_track_len = min(max_track_len, max_track_seq)
+
+    padded_examples, full_mask, track_mask, full_token_type_ids = [], [], [], []
+    for track in no_pad_examples:
+        # track = track['input_ids'][0]
+        padded_words, words_masks, token_type_ids = [], [], []
+        for words in track:
+            # padded_word, words_mask = pad_and_mask(words, max_word_len, pad_idx)
+            padded_words.append( words['input_ids'][0])
+            words_masks.append( words['attention_mask'][0])
+            token_type_ids.append( words['token_type_ids'][0])
+            
+        if len(padded_words) < max_track_len:
+            track_mask.append([1 for _ in range(len(padded_words))] +
+                              [0 for _ in range(max_track_len - len(padded_words))])
+            padded_words = padded_words + [padded_words[-1]
+                                           for _ in range(max_track_len -
+                                                          len(padded_words))]
+            words_masks = words_masks + [words_masks[-1]
+                                         for _ in range(max_track_len -
+                                                        len(words_masks))]
+            token_type_ids = token_type_ids + [ token_type_ids[-1]
+                                         for _ in range(max_track_len -
+                                                        len(token_type_ids))]
+        else:
+            padded_words = padded_words[:max_track_len]
+            words_masks = words_masks[:max_track_len]
+            token_type_ids = token_type_ids[:max_track_len]
+            track_mask.append([1 for _ in range(len(padded_words))])
+        padded_examples.append(padded_words)
+        full_mask.append(words_masks)
+        full_token_type_ids.append( token_type_ids)
+    return padded_examples, full_mask, track_mask, full_token_type_ids
+#####################################################################
+
+
 def target_vectorization(sentiments):
     vader, flair = [], []
     blob_sent, blob_subj = [], []
@@ -218,17 +268,21 @@ class IO(object):
     def __init__(self,
                  folder_path,
                  batch_size=64,
-                 max_seq_len=128,
+                 max_seq_len=162,#kishore_update
                  previous_comment_cnt=6,
                  min_comment_cnt=6,
                  target_sentiment=True,
-                 target_emotion=False):
+                 target_emotion=False,
+                 max_title_len= 12, #kishore_update
+                 max_comment_len= 150 ) : #kishore_update
         self.authors = json.load(open(os.path.join(folder_path, 'frequent_author_record.json')))
-        self.articles = json.load(open(os.path.join(folder_path, 'article_idx.json')))
-        self.comments = json.load(open(os.path.join(folder_path, 'sentiment_emotion_comment.json')))
+        # self.articles = json.load(open(os.path.join(folder_path, 'article_idx.json')))
+        # self.comments = json.load(open(os.path.join(folder_path, 'sentiment_emotion_comment.json')))
+        self.articles = json.load(open(os.path.join(folder_path, 'article_idx_bert.json')))#kishore_update
+        self.comments = json.load(open(os.path.join(folder_path, 'senti_emo_comment_bert.json'))) #kishore_update
         self.topic_size = len(open(os.path.join(folder_path, 'vocab.topic')).readlines())
-        self.word2idx = {}
-        self.load_vocab(folder_path)
+        # self.word2idx = {} #kishore_update
+        # self.load_vocab(folder_path) #kishore_update
 
         self.batch_size = batch_size
         self.target_sentiment = target_sentiment
@@ -237,6 +291,9 @@ class IO(object):
         self.previous_cnt = previous_comment_cnt
         self.min_comment_cnt = min_comment_cnt
         self.max_seq_len = max_seq_len
+        self.max_title_len = max_title_len #kishore_update
+        self.max_comment_len = max_comment_len #kishore_update
+
 
     def load_vocab(self, folder):
         for line in open(os.path.join(folder, 'vocab.token'), encoding='utf-8'):
@@ -284,23 +341,23 @@ class IO(object):
                 pid = self.comments[cid]['pid']
                 aid = self.comments[cid]['aid']
                 if pid and pid in self.comments:
-                    read_track.append(self.comments[pid]['bpe'])
+                    read_track.append(self.comments[pid]['combo_bert']) #kishore update
                 elif pid == 'N' or not pid:
-                    # read_track.append(self.articles[aid]['bpe'])
+                    read_track.append(self.articles[aid]['t_bert'])
                     ##kishore update###
-                    if len(self.articles[aid]['a_bpe']) == 0:
-                        a_bpe = self.articles[aid]['t_bpe']
-                    else:
-                        a_bpe = self.articles[aid]['a_bpe']
+                    # if len(self.articles[aid]['a_bert']) == 0:
+                    #     a_bert = self.articles[aid]['t_bert']
+                    # else:
+                    #     a_bert = self.articles[aid]['a_bert']
                     ####################
-                    read_track.append(a_bpe)
+                    # read_track.append(a_bert)
                 elif pid and pid not in self.comments:
                     read_track.append([2])
                 else:
                     print('Unseen PID', pid)
                     raise NotImplementedError()
 
-                write_track.append(self.comments[cid]['bpe'])
+                write_track.append(self.comments[cid]['combo_bert'])
 
                 if self.target_sentiment:
                     vader.append(self.comments[cid]['sentiment']['vader'])
@@ -316,8 +373,12 @@ class IO(object):
             sents.append(sent)
             subjs.append(subj)
             emotions.append(emotion)
-        read_tracks = pad_seq_seq(read_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
-        write_tracks = pad_seq_seq(write_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)
+
+        # read_tracks = bert_pad_seq_seq( read_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)#kishore_update
+        read_tracks = bert_pad_seq_seq( read_tracks, pad_idx=0, max_word_seq=self.max_title_len, max_track_seq=-1)#kishore_update 
+        write_tracks = bert_pad_seq_seq( write_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)#kishore_update
+        # read_tracks = pad_seq_seq(read_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)#kishore_update
+        # write_tracks = pad_seq_seq(write_tracks, pad_idx=0, max_word_seq=self.max_seq_len, max_track_seq=-1)#kishore_update
         vaders = pad_seq(vaders, -1, max_word_seq=-1)
         flairs = pad_seq(flairs, -1, max_word_seq=-1)
         sents = pad_seq(sents, -1, max_word_seq=-1)

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence as pack
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
+from transformers import DistilBertModel, BertTokenizerFast
 
 import numpy as np
 
@@ -12,6 +13,17 @@ class Model(nn.Module):
                  config):
         super(Model, self).__init__()
         self.token_embedding = None
+
+        ###############kishore_update#######################################
+        ##BERT pretrained
+        # import BERT-base pretrained model
+        self.bert  = DistilBertModel.from_pretrained('distilbert-base-uncased')
+
+        # Freeze the BERT model
+        if config['freeze_bert']:
+            for param in self.bert.parameters():
+                param.requires_grad = False
+        #####################################################################
         self.token_encoder = getattr(nn, config['rnn_type'].upper())(
             input_size=config['token_dim'], hidden_size=config['hid_dim'] // 2,
             num_layers=1, dropout=config['dropout'],
@@ -86,17 +98,82 @@ class Model(nn.Module):
 
         self.config = config
 
+    ###############kishore_update#######################################
     def _encode_seq_seq_(self, seq_seq_tensor, token_mask):
+        #Here token_mask is attention_mask in bert token
         batch_size, seq_len, token_size = seq_seq_tensor.size()
         token_encode_mtx = seq_seq_tensor.view(-1, token_size)
+        attention_mtx = token_mask.view(-1, token_size)
         token_len = token_mask.view(-1, token_size).sum(-1)
-        # token_sorted_len, token_order, token_track = sort_tensor_len(token_len)
+    
+        # attention_encode_mtx = track_attention.view(-1, token_size)
+        # embeds, ht = self._rnn_encode_(self.token_encoder, self.token_embedding(token_encode_mtx),
+        #                                token_len)
+        # embeds = embeds.view(batch_size, seq_len, token_size, embeds.size(-1))
+        # ht = ht.view(batch_size, seq_len, ht.size(-1))
+        # return embeds, ht
 
-        embeds, ht = self._rnn_encode_(self.token_encoder, self.token_embedding(token_encode_mtx),
-                                       token_len)
-        embeds = embeds.view(batch_size, seq_len, token_size, embeds.size(-1))
-        ht = ht.view(batch_size, seq_len, ht.size(-1))
-        return embeds, ht
+        # Feed input to BERT
+        bert_outputs = self.bert(input_ids= token_encode_mtx, attention_mask= attention_mtx)
+        
+        # Extract the last hidden state of the token `[CLS]` for classification task
+        last_hidden_state_cls = bert_outputs[0][:, 0, :]
+
+        cls_format = last_hidden_state_cls.view(batch_size, seq_len, last_hidden_state_cls.size(-1))
+        return cls_format
+        
+    #####################################################################
+
+    def _rnn_encode_(self, rnn, x, length, order=None, track=None):
+        if len(x.size()) == 3:
+            batch_size, seq_len, token_num = x.size()
+        elif len(x.size()) == 2:
+            batch_size, token_num = x.size()
+        else:
+            raise NotImplementedError("Not support input dimensions {}".format(x.size()))
+
+        if order is not None:
+            x = x.index_select(0, order)
+        x = self.dropout(x)
+        x = pack(x, length, batch_first=True, enforce_sorted=False)
+        
+        outputs, h_t = rnn(x)
+        outputs = unpack(outputs, batch_first=True)[0]
+        if isinstance(h_t, tuple):
+            h_t = h_t[0]
+        if track is not None:
+            outputs = outputs[track]
+            h_t = h_t.index_select(1, track).transpose(0, 1).contiguous()
+        else:
+            h_t = h_t.transpose(0, 1).contiguous()
+        return outputs, h_t.view(batch_size, -1)
+
+    ###############kishore_update#######################################
+    # def create_bert_tracks( self,read_track, device ):
+    #     # Create empty lists to store outputs
+    #     read_track_input = []
+    #     read_track_atten = []
+
+    #     for r in read_track:
+    #         input = [torch.tensor( track['input_ids'] , device=device) for track in r]
+    #         att_mask = [torch.tensor( atten['attention_mask'] , device=device) for atten in r]
+    #         read_track_input.append(input)
+    #         read_track_atten.append(att_mask)
+        
+    #     # # For every sentence...
+    #     # for sent in data:    
+    #     #     # Add the outputs to the lists
+    #     #     input_ids.append(encoded_sent.get('input_ids'))
+    #     #     attention_masks.append(encoded_sent.get('attention_mask'))
+
+    #     # # Convert lists to tensors
+    #     # input_ids = torch.tensor(input_ids)
+    #     # attention_masks = torch.tensor(attention_masks)
+
+    #     return read_track_input,read_track_atten
+
+    #####################################################################
+
 
     def forward(self, author, read_track, write_track, article_pack, sentiments, emotion, device, train=True):
         """
@@ -112,15 +189,25 @@ class Model(nn.Module):
         """
         result = {}
         author = torch.tensor(author, device=device)
-        read_track = [torch.tensor(r, device=device) for r in read_track]
-        write_track = [torch.tensor(w, device=device) for w in write_track]
+
+        ###############kishore_update#######################################
+        
+        read_track = [ torch.tensor(r, device=device) for r in read_track]
+        write_track = [ torch.tensor(w, device=device) for w in write_track]
         seq_len = write_track[2].view(-1, write_track[0].size(1)).sum(-1)
-
-        r_embeds, r_ht = self._encode_seq_seq_(read_track[0], read_track[1])
-
+        # r_embeds, r_ht = self._encode_seq_seq_(read_track[0], read_track[1])
+        
+        
+        # read_track_input, read_track_atten = self.create_bert_tracks(read_track, device = device)
+        # write_track_input, write_track_atten = self.create_bert_tracks(write_track, device = device)        
+        # seq_len = write_track_input[2].view(-1, write_track_input[0].size(1)).sum(-1)
+        r_ht = self._encode_seq_seq_(read_track[0], read_track[1])
+        #####################################################################
+        
         author_embeds = []
         if self.config['build_author_track']:
-            w_embeds, w_ht = self._encode_seq_seq_(write_track[0], write_track[1])
+            # w_embeds, w_ht = self._encode_seq_seq_(write_track[0], write_track[1])
+            w_ht = self._encode_seq_seq_(write_track[0], write_track[1] )
 
             tracks = [r_ht, w_ht]
             if self.config['build_sentiment_embedding']:
@@ -153,7 +240,8 @@ class Model(nn.Module):
             author_embeds = author_embeds[0]
         else:
             raise NotImplementedError()
-
+        
+        #Extracting last article to predict the sentiment
         final_idx = (seq_len - 1).view(-1, 1).expand(-1, r_ht.size(2))
         final_idx = final_idx.unsqueeze(1)
         final_rt = r_ht.gather(1, final_idx).squeeze(1)
@@ -180,28 +268,7 @@ class Model(nn.Module):
             result['topic'] = self.topic_predict(ht)
         return result
 
-    def _rnn_encode_(self, rnn, x, length, order=None, track=None):
-        if len(x.size()) == 3:
-            batch_size, seq_len, token_num = x.size()
-        elif len(x.size()) == 2:
-            batch_size, token_num = x.size()
-        else:
-            raise NotImplementedError("Not support input dimensions {}".format(x.size()))
-
-        if order is not None:
-            x = x.index_select(0, order)
-        x = self.dropout(x)
-        x = pack(x, length, batch_first=True, enforce_sorted=False)
-        outputs, h_t = rnn(x)
-        outputs = unpack(outputs, batch_first=True)[0]
-        if isinstance(h_t, tuple):
-            h_t = h_t[0]
-        if track is not None:
-            outputs = outputs[track]
-            h_t = h_t.index_select(1, track).transpose(0, 1).contiguous()
-        else:
-            h_t = h_t.transpose(0, 1).contiguous()
-        return outputs, h_t.view(batch_size, -1)
+    
 
     def build_embedding(self, vocab=None, embedding=None):
         if vocab and embedding:

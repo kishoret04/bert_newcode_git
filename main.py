@@ -3,7 +3,7 @@ import time
 import torch
 import random
 import numpy as np
-from utils import args_util, io_util, model_util, pipeline
+from utils import args_util, io_util, newmodel_util, pipeline
 import argparse
 
 
@@ -29,7 +29,7 @@ def main():
 
     #kishore update parameters
     args_dict = vars(args)
-    args_dict['root_folder'] = r'/home/kishore/Fanyang_code/news/news/outlets'
+    # args_dict['root_folder'] = r'/home/kishore/Fanyang_code/news/news/outlets'
     args_dict['build_author_predict'] = False
     args_dict['build_topic_predict'] = False
 
@@ -72,9 +72,12 @@ def main():
               'previous_comment_cnt': args.previous_comment_cnt,
               'min_comment_cnt': args.min_comment_cnt,
               'max_seq_len': args.max_seq_len,
+              'max_title_len': args.max_title_len, #kishore_update
+              'max_comment_len': args.max_comment_len, #kishore_update
               'prob_to_full': args.prob_to_full,
               'sentiment_fingerprinting': args.sentiment_fingerprinting,
-              'emotion_fingerprinting': args.emotion_fingerprinting
+              'emotion_fingerprinting': args.emotion_fingerprinting,
+              'freeze_bert' : args.freeze_bert
               }
 
     
@@ -87,7 +90,7 @@ def main():
         embedding = load_embedding(args.embedding_weight)
     else:
         embedding = None
-    for outlet in ['Archiveis', 'wsj', 'NewYorkTimes']:  # os.listdir(args.root_folder):
+    for outlet in [ 'NewYorkTimes'] : #,'Archiveis', 'wsj',]:  # os.listdir(args.root_folder): #kishore_update
         print("Working on {} ...".format(outlet))
         io = io_util.IO(folder_path=os.path.join(args.root_folder, outlet),
                         batch_size=config['batch_size'],
@@ -95,13 +98,15 @@ def main():
                         previous_comment_cnt=config['previous_comment_cnt'],
                         min_comment_cnt=config['min_comment_cnt'],
                         target_sentiment=config['sentiment_fingerprinting'],
-                        target_emotion=config['emotion_fingerprinting'])
+                        target_emotion=config['emotion_fingerprinting'],
+                        max_title_len=config['max_title_len'], #kishore_update
+                        max_comment_len=config['max_comment_len'] ) #kishore_update
         config['author_size'] = len(io.authors)
         config['topic_size'] = io.topic_size
-        config['token_size'] = len(io.word2idx)
+        # config['token_size'] = len(io.word2idx) #kishore_update
         config['outlet'] = outlet
 
-        model = model_util.Model(config)
+        model = newmodel_util.Model(config)
         sgd = torch.optim.Adam(model.parameters(), lr=config['lr'], amsgrad=True)
         # sgd = torch.optim.SGD(model.parameters(), lr=config['lr'])
         # sgd = torch.optim.RMSprop(model.parameters(), centered=True)
@@ -112,7 +117,7 @@ def main():
             model.load_state_dict(checkpoint['model'])
             sgd.load_state_dict(checkpoint['sgd'])
         else:
-            model.build_embedding(vocab=io.word2idx, embedding=embedding)
+            # model.build_embedding(vocab=io.word2idx, embedding=embedding)
             model.to(device)
         pipe = pipeline.Pipeline(data_io=io,
                                  epoch=args.epoch,

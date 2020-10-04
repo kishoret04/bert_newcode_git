@@ -14,11 +14,15 @@ def add_general_args(args=None):
     args = args if args else argparse.ArgumentParser()
     args.add_argument('--random_seed', type=int, default=126)
     args.add_argument('--gpu_id', type=int, default=0)
-    args.add_argument('--root_folder', type=str, default='D:/data/outlets')
-    # args.add_argument('--root_folder', type=str, default='/home/kishore/Fanyang_code/news/news/outlets')#kishore update
+    # args.add_argument('--root_folder', type=str, default='D:/data/outlets')
+    # args.add_argument('--root_folder', type=str, default='/home/kishore/Fanyang_code/news/news/outlets')#kishore_update
+    args.add_argument('--root_folder', type=str, default='/home/kishore/news_code/ouput/') #kishore_update
     args.add_argument('--previous_comment_cnt', type=int, default=12)
     args.add_argument('--min_comment_cnt', type=int, default=14)
-    args.add_argument('--max_seq_len', type=int, default=128)
+    # args.add_argument('--max_seq_len', type=int, default=128)
+    args.add_argument('--max_seq_len', type=int, default= 165) #kishore_update
+    args.add_argument('--max_title_len', type=int, default= 16)#kishore_update
+    args.add_argument('--max_comment_len', type=int, default= 150)#kishore_update
     args.add_argument('--prob_to_full', type=float, default=1.)
     args.add_argument('--embedding_weight', default='d:/data/embedding/en.wiki.bpe.vs25000.d300.w2v.txt')
     # args.add_argument('--embedding_weight', default='')
@@ -28,7 +32,8 @@ def add_general_args(args=None):
 def add_model_args(args=None):
     args = args if args else argparse.ArgumentParser()
     args.add_argument('--rnn_type', default='lstm', choices=['lstm', 'gru'])
-    args.add_argument('--hid_dim', type=int, default=256)
+    # args.add_argument('--hid_dim', type=int, default=256)
+    args.add_argument('--hid_dim', type=int, default= 768)#kishore_update size = (768) BERT output
     args.add_argument('--token_dim', type=int, default=300)
     args.add_argument('--dropout', type=float, default=0.)
     args.add_argument('--rnn_layer', type=int, default=2)
@@ -46,6 +51,7 @@ def add_model_args(args=None):
     args.add_argument('--leverage_emotion', type=str2bool, default=True)
     args.add_argument('--sentiment_fingerprinting', type=str2bool, default=True)
     args.add_argument('--emotion_fingerprinting', type=str2bool, default=True)
+    args.add_argument('--freeze_bert', type=str2bool, default=True) #kishore_update
     return args
 
 
